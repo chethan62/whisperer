@@ -709,9 +709,18 @@ every previously processed file through the changed code, plus the test suite, b
 
 ## Credits and licences
 
-whisperer and the contributions on top of it are **MIT** (see [LICENSE](LICENSE)). Nothing third-party is
-vendored: engines are pip-installed and models are fetched at install time — by the user, or by vlc-ai-subs'
-installer — which is why there is no `NOTICE` file to go with this list.
+whisperer and the contributions on top of it are **MIT** (see [LICENSE](LICENSE)).
+
+**In this repository** nothing third-party is vendored: engines are pip-installed and models are fetched at
+install time — by the user, or by vlc-ai-subs' installer — which is why there is no `NOTICE` file here. **The
+prebuilt binaries are the exception**: they bundle what `build.py` collects — PySide6/Qt (LGPL-3.0), the
+faster-whisper stack (CTranslate2, onnxruntime, tokenizers, huggingface_hub, av, …) and tqdm (MPL-2.0,
+unmodified, source at [tqdm/tqdm](https://github.com/tqdm/tqdm)) — and they ship a `licences/` folder next to
+the executable: the LGPL-3.0 + GPL-3.0 and Apache-2.0 **texts**, the project's own LICENSE, one notice per
+bundled package generated from the wheel's metadata, and an `INDEX.txt` of the lot. Python wheels carry only a
+one-line licence field and no text — PySide6 included — so that folder is not decoration: it is what makes the
+binary redistribution of Qt and tqdm meet their terms. [`licences/`](licences/README.md) in this repo holds the
+texts, with their sources and hashes.
 
 **The app**
 

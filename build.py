@@ -52,6 +52,65 @@ def metadata_flags(*names: str) -> list:
     return flags
 
 
+# Everything the bundle contains that is not this project. Keep in step with the
+# --collect-* flags below: a package that ships in the binary and is not named here
+# ends up in the notices with no licence statement at all.
+BUNDLED = ("PySide6", "shiboken6", "faster-whisper", "ctranslate2", "onnxruntime",
+           "tokenizers", "huggingface_hub", "av", "numpy", "requests", "httpx",
+           "filelock", "packaging", "PyYAML", "tqdm", "fsspec", "hf-xet", "psutil")
+
+
+def licence_files() -> str:
+    """Collect the licence texts + per-package notices into one folder, return it.
+
+    LGPL-3.0 (PySide6/Qt) and Apache-2.0 (tokenizers, huggingface_hub) require the
+    licence text to accompany a binary redistribution, and Python wheels carry only a
+    one-line `License:` field in their metadata — no text at all, PySide6 included — so
+    PyInstaller's output has nothing to satisfy that with. The texts live in `licences/`
+    next to this script (committed, with sources in licences/README.md); the notices are
+    generated here from each installed distribution's own metadata.
+    """
+    from importlib.metadata import PackageNotFoundError, distribution
+
+    src = os.path.join(ROOT, "licences")
+    dest = os.path.join(BUILD_DIR, "licences")
+    shutil.rmtree(dest, ignore_errors=True)
+    os.makedirs(dest, exist_ok=True)
+    texts = []
+    for name in sorted(os.listdir(src)):
+        if name.endswith(".txt"):
+            shutil.copyfile(os.path.join(src, name), os.path.join(dest, name))
+            texts.append(name)
+
+    rows = []
+    for name in BUNDLED:
+        try:
+            dist = distribution(name)
+        except PackageNotFoundError:
+            continue
+        meta = dist.metadata
+        licence = (meta.get("License-Expression") or meta.get("License") or "").strip()
+        if not licence:
+            licence = "; ".join(c.split("::")[-1].strip() for c in meta.get_all("Classifier") or []
+                                if c.startswith("License ::")) or "not declared by the wheel"
+        notice = os.path.join(dest, f"{name}-{dist.version}-notice.txt")
+        with open(notice, "w", encoding="utf-8") as fh:
+            fh.write(f"{meta.get('Name', name)} {dist.version}\n"
+                     f"Licence: {licence}\n"
+                     f"Home: {meta.get('Home-page') or meta.get('Project-URL') or ''}\n\n"
+                     "This notice is generated from the installed distribution's metadata. The full licence\n"
+                     "text is either the file named after it in this folder or at https://spdx.org/licenses/\n")
+        rows.append((meta.get("Name", name), dist.version, licence))
+
+    with open(os.path.join(dest, "INDEX.txt"), "w", encoding="utf-8") as fh:
+        fh.write(f"{APP_NAME} {APP_VERSION} bundles the components below.\n"
+                 f"Its own licence is MIT — see the LICENSE file next to the executable.\n\n")
+        for name, version, licence in rows:
+            fh.write(f"  {name} {version}: {licence}\n")
+        fh.write("\nLicence texts shipped here: " + ", ".join(texts) + "\n")
+    return dest
+
+
 VERSION_INFO_TEMPLATE = """\
 # Windows version resource. An executable with no publisher/product metadata looks like malware to
 # SmartScreen and to antivirus heuristics; this does not replace a signature, but it is the cheap half.
@@ -126,6 +185,10 @@ def pyinstaller_command() -> list:
         "--exclude-module=PySide6.QtMultimedia", "--exclude-module=PySide6.QtCharts", "--exclude-module=PySide6.QtPdf",
         "--exclude-module=torch", "--exclude-module=tkinter",
         f"--add-data={os.path.join(ROOT, 'icon.ico')}{os.pathsep}.",
+        # the app's own licence and the third-party licence texts + notices:
+        # LGPL-3.0 (Qt) and Apache-2.0 require them to travel with the binary
+        f"--add-data={os.path.join(ROOT, 'LICENSE')}{os.pathsep}.",
+        f"--add-data={licence_files()}{os.pathsep}licences",
     ]
     if platform.system() != "Darwin":
         cmd.append(f"--icon={os.path.join(ROOT, 'icon.ico')}")

@@ -8,3 +8,6 @@ presets/*.json
 .venv/
 temp/
 models.json
+# the CUDA libraries the app downloads at the user's request (Model tab): NVIDIA's own
+# terms, gigabytes, and never ours to redistribute
+cuda/
