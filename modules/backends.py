@@ -300,6 +300,12 @@ def transcribe_whisper_cpp(audio_path: str, settings: Dict, cb: TranscribeCallba
 # ---------------------------------------------------------------------------
 # Parakeet Redux (Photon runtime) — external, in its own venv
 # ---------------------------------------------------------------------------
+# Attribution: the weights are Moondream's CC-BY-4.0 quantisation of NVIDIA's
+# `parakeet-tdt-0.6b-v3` (also CC-BY-4.0); the runtime that runs them —
+# `moondream` + `kestrel-kernels` (M87 Labs) — is PROPRIETARY, licensed only
+# under a separate agreement, and is never bundled or redistributed by this app.
+# `photon_runner.py`, which is what this module drives, is MIT (vlc-ai-subs).
+# The full list is in the README's "Credits and licences".
 # Where vlc-ai-subs installs the runtime (venv-photon + photon_runner.py). Both
 # can be pointed elsewhere with the environment, and a batch user who never
 # installed vlc-ai-subs can install the runtime on its own.

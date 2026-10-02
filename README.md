@@ -147,9 +147,10 @@ film dialogue, 8 CPU threads, on an idle box:
 (Transcribe time only, the one-time model load reported separately — 4.3 s for Redux, which is why a short
 clip reads slower than the engine is.)
 
-**It is not part of this app and it is not open.** The weights are CC-BY-4.0; the runtime is proprietary
-(`moondream` + `kestrel-kernels`, the ternary GEMM kernels), which is why it is opt-in, nothing is vendored,
-and the installer prints the licence before downloading anything. Install it with
+**It is not part of this app and it is not open** — the weights are Moondream's CC-BY-4.0 quantisation of
+NVIDIA's Parakeet, and the runtime's kernels are proprietary; see
+[Credits and licences](#credits-and-licences). That is why it is opt-in, why nothing is vendored, and why the
+installer prints the terms before downloading anything. Install it with
 [vlc-ai-subs](https://github.com/chethan62/vlc-ai-subs)' installer — the engine, its runner and its own venv
 live there:
 
@@ -706,6 +707,45 @@ every previously processed file through the changed code, plus the test suite, b
   by that amount; timestamp gaps in the audio no longer shift later cues.
 - Self-test now runs real speech through both paths (generate, then shift by 2 s and resync) on the frozen build.
 
+## Credits and licences
+
+whisperer and the contributions on top of it are **MIT** (see [LICENSE](LICENSE)). Nothing third-party is
+vendored: engines are pip-installed and models are fetched at install time — by the user, or by vlc-ai-subs'
+installer — which is why there is no `NOTICE` file to go with this list.
+
+**The app**
+
+| what | who | licence |
+|---|---|---|
+| whisperer | Jan Kučera ([hclivess/whisperer](https://github.com/hclivess/whisperer)) | MIT |
+
+**Engines and runtimes**
+
+| what | who | licence |
+|---|---|---|
+| faster-whisper | SYSTRAN ([repo](https://github.com/SYSTRAN/faster-whisper)) | MIT |
+| CTranslate2 (the inference engine under it) | OpenNMT ([repo](https://github.com/OpenNMT/CTranslate2)) | MIT |
+| whisper.cpp | ggml-org ([repo](https://github.com/ggml-org/whisper.cpp)) | MIT |
+| Photon runtime — `moondream` + `kestrel-kernels` | Moondream / M87 Labs ([PyPI](https://pypi.org/project/kestrel-kernels/)) | **proprietary**: the kernels are licensed only under a separate written agreement, and are never bundled, redistributed or reverse-engineered here — published behaviour only |
+| `photon_runner.py` and the Photon installer | chethan62 / voidrlm ([vlc-ai-subs](https://github.com/chethan62/vlc-ai-subs)) | MIT |
+| PySide6 (Qt for Python) — bundled in the prebuilt binaries | Qt Company ([PyPI](https://pypi.org/project/PySide6/)) | [LGPL-3.0](https://www.gnu.org/licenses/lgpl-3.0.html) (or GPL); the binaries are built `--onedir`, so the Qt libraries stay replaceable — see Qt's [LGPL obligations](https://www.qt.io/licensing/open-source-lgpl-obligations) |
+| psutil | Giampaolo Rodola ([PyPI](https://pypi.org/project/psutil/)) | BSD-3-Clause |
+| FFmpeg | FFmpeg project | not bundled — required in PATH, so it keeps the licence of your build (LGPL or GPL) |
+
+**Models and weights** — a conversion is a second credit: the artefact downloaded is rarely the original author's
+
+| what | who | licence |
+|---|---|---|
+| Whisper weights (`tiny` … `large-v3-turbo`) | OpenAI ([openai/whisper](https://github.com/openai/whisper)) | MIT |
+| … in the CTranslate2 form faster-whisper loads | converted by SYSTRAN ([`Systran/faster-whisper-*`](https://huggingface.co/Systran/faster-whisper-small)) | MIT |
+| … in the GGML form whisper.cpp loads | converted by ggml-org ([`ggerganov/whisper.cpp`](https://huggingface.co/ggerganov/whisper.cpp)) | MIT |
+| `distil-*` and the `models.json` fine-tunes | the fine-tune's own author (community) | per its model card — check before downloading |
+| Parakeet Redux weights — `redux` (178 MB), `ultra` (385 MB) | quantised to ternary by Moondream ([moondream/parakeet-redux](https://huggingface.co/moondream/parakeet-redux)) from NVIDIA's [parakeet-tdt-0.6b-v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) | **[CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)** for both the original and the quantisation — attribution required |
+
+The Parakeet Redux engine is the one entry above whose **runtime** is not open source: that is why it is opt-in,
+why nothing about it is vendored, and why the installer prints its terms before downloading anything. Its
+weights are CC-BY-4.0 and are credited above, and its engine names both the original and the quantiser.
+
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE) and [Credits and licences](#credits-and-licences) for what ships on top of it.

@@ -1152,7 +1152,11 @@ class UIManager(QWidget):
                           "or by <b>Parakeet Redux</b> on the external Photon runtime.</p>"
                           "<p>Drop files, pick a model, press Start — SRT/VTT/TXT/JSON subtitles are written "
                           "next to your videos, optionally embedded as a soft subtitle track.</p>"
-                          "<p>MIT License · <a href='https://github.com/hclivess/whisperer'>github.com/hclivess/whisperer</a></p>")
+                          "<p>MIT License · <a href='https://github.com/hclivess/whisperer'>github.com/hclivess/whisperer</a></p>"
+                          "<p style='font-size: 11px;'>Engine credits: Whisper by OpenAI (MIT); faster-whisper by "
+                          "SYSTRAN, whisper.cpp by ggml-org (both MIT); Parakeet Redux weights by NVIDIA and "
+                          "Moondream (CC-BY-4.0) on the proprietary Photon runtime. Full list in the "
+                          "README's Credits and licences.</p>")
 
     def _show_model_info(self):
         QMessageBox.information(self.main_window, "Models",
