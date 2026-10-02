@@ -186,15 +186,18 @@ class _Worker(QThread):
         try:
             if engine == "parakeet_redux":
                 # This engine decodes the media itself, and its own audio-track
-                # selection is the better one: `-map 0:a:0` below takes the FIRST
-                # stream, which on a MULTi release is the dub (measured here: a
-                # French VFF track came first, and an English run transcribed the
-                # French from that WAV). ffmpeg is still required — the runtime
-                # shells out to it.
+                # selection is the better one: it reports the track it chose
+                # ("track 2/3 · eng") and takes the dialogue over the dub. ffmpeg is
+                # still required — the runtime shells out to it.
                 if not find_ffmpeg():
                     raise RuntimeError("FFmpeg is required for Parakeet Redux (it decodes the media itself).")
             elif find_ffmpeg():
-                extract_audio(src, wav, stop_check=self._stop.is_set)
+                # the share of the track choice the other two engines need: extract the
+                # stream that matches the chosen language, not just the first one
+                label = extract_audio(src, wav, stop_check=self._stop.is_set,
+                                      language=s.get("language", ""))
+                if label:
+                    self.status.emit(f"Audio track {label}")
                 audio_for_engine = wav
             elif engine == "whisper_cpp":
                 raise RuntimeError("FFmpeg is required to feed whisper.cpp (16 kHz WAV)")
