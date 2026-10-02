@@ -21,13 +21,15 @@ ENGINES = {
     "parakeet_redux": "Parakeet Redux (external, CPU — fastest here)",
 }
 
-# Parakeet Redux (the Photon runtime) ships fixed ternary weights rather than a
-# size ladder, so its model dropdown is a variant list and neither entry is
-# downloaded by this app — the runtime owns them. `redux` is the measured
-# default; `ultra` is the larger, slower variant.
+# The Photon runtime ships fixed weights rather than a size ladder, so the model
+# dropdown is a variant list and neither entry is downloaded by this app — the
+# runtime owns them. `redux` is the ternary model built for CPUs (178 MB, the
+# measured default here); `ultra` is the same 0.6B model in FULL precision — 1.3 GB
+# of weights — post-trained further and built for GPUs, and it beats the original
+# parakeet-tdt-0.6b-v3 on every benchmark group its card publishes.
 REDUX_MODEL_CHOICES = [
     ("redux", "parakeet-redux (ternary, 178 MB — default)"),
-    ("ultra", "parakeet-ultra (ternary, 385 MB — larger, slower)"),
+    ("ultra", "parakeet-ultra (full precision, 1.3 GB — for GPUs)"),
 ]
 
 # Model sizes understood by both engines

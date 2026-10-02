@@ -147,6 +147,13 @@ film dialogue, 8 CPU threads, on an idle box:
 (Transcribe time only, the one-time model load reported separately — 4.3 s for Redux, which is why a short
 clip reads slower than the engine is.)
 
+The gap to the model card's figures is the instruction set, not the model: the runtime picks its packed kernel by
+ISA, and Moondream's own x86 measurement is **113×** on eight cores of an AMD EPYC with **AVX-512**. This
+laptop's i5-10300H has AVX2 only, which is why the same engine reads 8.5–9.8× here. Their FLEURS numbers cover
+all 25 languages the model supports — average 10.56 against the original's 11.62, but behind it on English
+(4.90 vs 4.25), French, German and Spanish, and widest behind in noise (9.04 vs 6.72 WER); only English has been
+measured in this app.
+
 **It is not part of this app and it is not open** — the weights are Moondream's CC-BY-4.0 quantisation of
 NVIDIA's Parakeet, and the runtime's kernels are proprietary; see
 [Credits and licences](#credits-and-licences). That is why it is opt-in, why nothing is vendored, and why the
@@ -183,13 +190,22 @@ What is specific to this engine, so nothing surprises you mid-run:
   chosen language, skipping audio-description tracks, and reports which it used.
 - **English is the measured language.** The base model covers 25 European languages, but only English has been
   measured here — other languages are untested rather than broken.
-- **Model**: `redux` (default, 178 MB) or `ultra` (385 MB). The dropdown stays editable and a real Photon repo
+- **Model**: `redux` (default, 178 MB, ternary) or `ultra` (1.3 GB — the same 0.6B model in **full precision**,
+  post-trained further; Moondream's card has it better than the original on every benchmark group, and it is the
+  one built for GPUs). The dropdown stays editable and a real Photon repo
   id (`owner/name`) is passed through, but a Whisper size left over from another engine (`large-v3`,
   `recommended`) would be read by the runtime as a repo and fetched as one — those are replaced by `redux`, and
   the status feed says so instead of failing after the audio was already decoded.
-- **Timing is segment-level.** Redux reports no word timings, so *Snap to speech* and the sentence repairs work
-  from the VAD's speech regions and the cue spans rather than from word alignment — the same fallback a Whisper
-  run without word timestamps takes.
+- **`ultra` on a GPU box: set Device = cuda.** The rule that `auto` never picks the GPU is measured for `redux`,
+  whose packed ternary kernels exist for x86 and Apple silicon and *not* for CUDA. `ultra` is full precision — the
+  runtime dequantises nothing, and every published number for it is GPU throughput on a B200 (9,743× against
+  NeMo's 6,005× at batch 128); its CPU behaviour is unmeasured here. `auto` still prefers the CPU, so choose
+  `cuda` explicitly if that is the box you are on.
+- **Timing is segment-level *here*.** The runtime can return word timings (`timestamps="word"`) and this engine
+  does not ask for them — the vlc-ai-subs runner it drives requests segment timings, and cue spans are what this
+  app's cue work needs. So *Snap to speech* and the sentence repairs run their no-word fallback (the VAD's speech
+  regions and the cue spans) rather than word alignment, exactly as a Whisper run without word timestamps does.
+  Word timings are the obvious next improvement for sharper snapping.
 - **CPU threads** is passed through (OpenMP), as it is for the other engines; `auto` leaves the runtime's own
   thread pool alone.
 - The runtime is installed by a shell installer, so **Linux and macOS** are the paths that are tested. On Windows,
@@ -749,7 +765,8 @@ texts, with their sources and hashes.
 | … in the CTranslate2 form faster-whisper loads | converted by SYSTRAN ([`Systran/faster-whisper-*`](https://huggingface.co/Systran/faster-whisper-small)) | MIT |
 | … in the GGML form whisper.cpp loads | converted by ggml-org ([`ggerganov/whisper.cpp`](https://huggingface.co/ggerganov/whisper.cpp)) | MIT |
 | `distil-*` and the `models.json` fine-tunes | the fine-tune's own author (community) | per its model card — check before downloading |
-| Parakeet Redux weights — `redux` (178 MB), `ultra` (385 MB) | quantised to ternary by Moondream ([moondream/parakeet-redux](https://huggingface.co/moondream/parakeet-redux)) from NVIDIA's [parakeet-tdt-0.6b-v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) | **[CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)** for both the original and the quantisation — attribution required |
+| `redux` — parakeet-redux, 178 MB | ternary (1.58-bit) quantisation by Moondream of NVIDIA's [parakeet-tdt-0.6b-v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) ([card](https://huggingface.co/moondream/parakeet-redux)) | **[CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)** — attribution required, as for the original |
+| `ultra` — parakeet-ultra, 1.3 GB | the same 0.6B model in **full precision**, post-trained further, by Moondream ([card](https://huggingface.co/moondream/parakeet-ultra)) | **[CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)** — attribution required |
 
 The Parakeet Redux engine is the one entry above whose **runtime** is not open source: that is why it is opt-in,
 why nothing about it is vendored, and why the installer prints its terms before downloading anything. Its
