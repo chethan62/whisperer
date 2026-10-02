@@ -319,6 +319,13 @@ REDUX_INSTALL_HINT = ("Install it with vlc-ai-subs' installer "
 REDUX_MODELS = ("redux", "ultra")
 DEFAULT_REDUX_MODEL = "redux"
 RAW_SEGMENTS_ENV = "VSCL_AISUBS_RAW_SEGMENTS"
+# Per-word spans come back in the same call (`timestamps="word"`), so asking for
+# them costs a query parameter, not a second decode. The engine asks when the
+# worker's cue work needs words — snapping, resync, the sentence repairs — and maps
+# what arrives into the segment dicts `utils/subtitle_utils.py` reads. Measured on
+# 40 s of film dialogue, the spans are what makes those repairs fire at all: 48
+# cue-text lines differ against the same run with the request suppressed.
+WORDS_ENV = "VSCL_AISUBS_PHOTON_WORDS"
 
 
 def redux_venv_dir(venv_dir: str = "") -> str:
@@ -384,6 +391,11 @@ def transcribe_parakeet_redux(audio_path: str, settings: Dict, cb) -> Tuple[List
     env["VSCL_AISUBS_DEVICE"] = settings.get("device") or "auto"
     env["VSCL_AISUBS_PHOTON_MODEL"] = model
     env[RAW_SEGMENTS_ENV] = "1"                  # this app applies its own cue rules
+    if settings.get("word_timestamps"):
+        # snapping, resync and the sentence repairs align to words; the runtime returns
+        # them in the same call (`timestamps="word"`), so this costs a query parameter
+        # rather than a second decode
+        env[WORDS_ENV] = "1"
     threads = int(settings.get("cpu_threads", 0) or 0)
     if threads > 0:
         # the runtime sizes its own thread pool otherwise; OpenMP is the knob torch's
@@ -429,6 +441,10 @@ def transcribe_parakeet_redux(audio_path: str, settings: Dict, cb) -> Tuple[List
                 if not text:
                     continue
                 d = {"start": float(event["start"]), "end": float(event["end"]), "text": text}
+                words = [{"start": float(w["start"]), "end": float(w["end"]), "word": w["word"]}
+                         for w in (event.get("words") or []) if (w.get("word") or "").strip()]
+                if words:
+                    d["words"] = words          # the shape the app's cue work reads
                 segments.append(d)
                 cb.segment(d)
                 if total:

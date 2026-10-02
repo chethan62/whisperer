@@ -28,7 +28,7 @@ def _fake_runtime(tmp_path, body: str, monkeypatch):
     the runner says (cues, an error event, a silent non-zero exit).
     """
     venv = tmp_path / "venv-photon"
-    (venv / "bin").mkdir(parents=True)
+    (venv / "bin").mkdir(parents=True, exist_ok=True)   # a test may re-wire in place
     interpreter = venv / "bin" / "python3"
     interpreter.write_text("#!/bin/sh\n" + body)
     interpreter.chmod(interpreter.stat().st_mode | stat.S_IEXEC)
@@ -75,15 +75,29 @@ def _callbacks(cb):
 CUE_BODY = "\n".join([
     f'echo {_STATUS!r}',
     'echo "{\\"type\\": \\"status\\", \\"msg\\": \\"RAW=$VSCL_AISUBS_RAW_SEGMENTS MODEL=$VSCL_AISUBS_PHOTON_MODEL '
-    'DEVICE=$VSCL_AISUBS_DEVICE THREADS=$OMP_NUM_THREADS PYTHONPATH=$PYTHONPATH\\"}"',
-    'echo \'{"type": "sub", "i": 1, "start": 0.5, "end": 2.5, "text": " Hello there. "}\'',
+    'DEVICE=$VSCL_AISUBS_DEVICE THREADS=$OMP_NUM_THREADS WORDS=$VSCL_AISUBS_PHOTON_WORDS PYTHONPATH=$PYTHONPATH\\"}"',
+    'echo \'{"type": "sub", "i": 1, "start": 0.5, "end": 2.5, "text": "Hello there."}\'',
+    'echo \'{"type": "sub", "i": 2, "start": 3.0, "end": 5.0, "text": "General Kenobi."}\'',
+    'echo \'{"type": "done", "segments": 2, "srt_path": null}\'',
+]) + "\n"
+
+
+# what the runtime sends when it was asked for word timings (timestamps="word")
+CUE_BODY_WORDS = "\n".join([
+    f'echo {_STATUS!r}',
+    'echo "{\\"type\\": \\"status\\", \\"msg\\": \\"RAW=$VSCL_AISUBS_RAW_SEGMENTS MODEL=$VSCL_AISUBS_PHOTON_MODEL '
+    'DEVICE=$VSCL_AISUBS_DEVICE THREADS=$OMP_NUM_THREADS WORDS=$VSCL_AISUBS_PHOTON_WORDS PYTHONPATH=$PYTHONPATH\\"}"',
+    'echo \'{"type": "sub", "i": 1, "start": 0.5, "end": 2.5, "text": "Hello there.",'
+    ' "words": [{"start": 0.5, "end": 1.2, "word": "Hello"}, {"start": 1.3, "end": 2.5, "word": "there."},'
+    ' {"start": 1.3, "end": 1.3, "word": "  "}]}\'',
     'echo \'{"type": "sub", "i": 2, "start": 3.0, "end": 5.0, "text": "General Kenobi."}\'',
     'echo \'{"type": "done", "segments": 2, "srt_path": null}\'',
 ]) + "\n"
 
 
 def _settings(**over):
-    s = {"engine": "parakeet_redux", "model": "redux", "device": "auto", "language": "en", "task": "transcribe"}
+    s = {"engine": "parakeet_redux", "model": "redux", "device": "auto", "language": "en", "task": "transcribe",
+         "word_timestamps": False}
     s.update(over)
     return s
 
@@ -118,6 +132,28 @@ def test_a_substituted_variant_is_announced(tmp_path, monkeypatch):
     backends.transcribe_parakeet_redux(str(tmp_path / "a.wav"), _settings(model="large-v3"), _callbacks(cb))
     assert any("'large-v3' is not a variant" in s for s in cb.statuses), cb.statuses
     assert any("MODEL=redux" in s for s in cb.statuses)
+
+
+def test_word_timings_are_requested_when_the_app_wants_them(tmp_path, monkeypatch):
+    """Snapping, resync and the sentence repairs align to words. The runtime returns
+    them in the same call, so the engine asks only when the worker says it needs
+    them — and passes the spans through in the shape the cue work reads."""
+    _fake_runtime(tmp_path, CUE_BODY, monkeypatch)
+    cb = _Cb()
+    segments, _ = backends.transcribe_parakeet_redux(str(tmp_path / "a.wav"), _settings(), _callbacks(cb))
+    assert any("WORDS= " in s for s in cb.statuses), ("off by default: the plugin-level call needs no words",
+                                                      cb.statuses)
+    assert "words" not in segments[0], "and nothing extra rides along"
+
+    _fake_runtime(tmp_path, CUE_BODY_WORDS, monkeypatch)     # now the runtime has words to give
+    cb = _Cb()
+    segments, _ = backends.transcribe_parakeet_redux(
+        str(tmp_path / "a.wav"), _settings(word_timestamps=True), _callbacks(cb))
+    assert any("WORDS=1" in s for s in cb.statuses), cb.statuses
+    assert [w["word"] for w in segments[0]["words"]] == ["Hello", "there."], "blank tokens are dropped"
+    assert segments[0]["words"][0]["start"] == 0.5 and segments[0]["words"][-1]["end"] == 2.5
+    # the shape utils/subtitle_utils.py reads: a list of {start, end, word}
+    assert set(segments[0]["words"][0]) == {"start", "end", "word"}
 
 
 def test_cpu_threads_reach_the_runtime(tmp_path, monkeypatch):

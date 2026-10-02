@@ -201,11 +201,12 @@ What is specific to this engine, so nothing surprises you mid-run:
   runtime dequantises nothing, and every published number for it is GPU throughput on a B200 (9,743× against
   NeMo's 6,005× at batch 128); its CPU behaviour is unmeasured here. `auto` still prefers the CPU, so choose
   `cuda` explicitly if that is the box you are on.
-- **Timing is segment-level *here*.** The runtime can return word timings (`timestamps="word"`) and this engine
-  does not ask for them — the vlc-ai-subs runner it drives requests segment timings, and cue spans are what this
-  app's cue work needs. So *Snap to speech* and the sentence repairs run their no-word fallback (the VAD's speech
-  regions and the cue spans) rather than word alignment, exactly as a Whisper run without word timestamps does.
-  Word timings are the obvious next improvement for sharper snapping.
+- **Word timings are used when the cue work needs them.** The runtime returns per-word spans in the same call
+  (`timestamps="word"`), and the engine asks for them whenever the worker's cue work does — snapping, resync or
+  the sentence repairs — so nothing costs a second decode. Measured on the same 40 s of film dialogue: with the
+  spans the sentence repairs fire (`He's not.`, `Can I help you?`, `I'm not sure.` — the casing and full stops
+  this app restores from word timing) and **48 cue-text lines differ** against the same run with the request
+  suppressed. With snapping, resync, the repairs and the passes all off, no words are requested at all.
 - **CPU threads** is passed through (OpenMP), as it is for the other engines; `auto` leaves the runtime's own
   thread pool alone.
 - The runtime is installed by a shell installer, so **Linux and macOS** are the paths that are tested. On Windows,
