@@ -27,7 +27,11 @@ A sibling of [videer](https://github.com/hclivess/videer) (same queue / progress
   and /T forms — `fre`/`fra`, `ger`/`deu`), instead of blindly the first stream, which
   on a MULTi release is the dub. The status line names the track it used
   (`Audio track 2/3 · eng`), and an untagged or unlisted language keeps the old
-  first-stream behaviour rather than guessing
+  first-stream behaviour rather than guessing. Audio-description and commentary
+  tracks (title markers, or the `visual_impaired`/`comment` disposition when a file
+  sets them — the flags are often absent) are never preferred while a plain dialogue
+  track exists; if the language you asked for is *only* available as one, it is used
+  and the label says so
 - Live queue: add files / folders or drag & drop while a run is in progress, reorder by dragging, pause / resume / stop
 - Live transcript panel — segments appear as they are decoded
 - Progress panel: per-file and overall bars, ETA, speed (× realtime), position, segment count
