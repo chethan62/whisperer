@@ -18,7 +18,17 @@ MEDIA_EXTENSIONS = [
 ENGINES = {
     "faster_whisper": "faster-whisper (built-in, CTranslate2)",
     "whisper_cpp": "whisper.cpp (external whisper-cli)",
+    "parakeet_redux": "Parakeet Redux (external, CPU — fastest here)",
 }
+
+# Parakeet Redux (the Photon runtime) ships fixed ternary weights rather than a
+# size ladder, so its model dropdown is a variant list and neither entry is
+# downloaded by this app — the runtime owns them. `redux` is the measured
+# default; `ultra` is the larger, slower variant.
+REDUX_MODEL_CHOICES = [
+    ("redux", "parakeet-redux (ternary, 178 MB — default)"),
+    ("ultra", "parakeet-ultra (ternary, 385 MB — larger, slower)"),
+]
 
 # Model sizes understood by both engines
 MODEL_SIZES = [

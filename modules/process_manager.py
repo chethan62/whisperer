@@ -11,7 +11,8 @@ from typing import Dict, List, Optional
 from PySide6.QtCore import QObject, QThread, Signal
 
 from config import HARDCODE_QUALITY, MUX_CONTAINERS, SUBTITLE_INPUTS
-from modules.backends import BACKENDS, TranscribeCallbacks, StoppedError, find_whisper_cli, faster_whisper_available
+from modules.backends import (BACKENDS, REDUX_INSTALL_HINT, StoppedError, TranscribeCallbacks,
+                               find_whisper_cli, faster_whisper_available, redux_available)
 from utils.ffmpeg_utils import (find_ffmpeg, probe_duration, probe_fps, extract_audio, mux_subtitles,
                                burn_subtitles, has_video)
 from utils.subtitle_utils import (capitalize_sentences, drop_looped_text, drop_repeated_text,
@@ -151,6 +152,8 @@ class _Worker(QThread):
             raise RuntimeError(f"Unknown engine {engine}")
         if engine == "faster_whisper" and not faster_whisper_available():
             raise RuntimeError("faster-whisper is not installed (pip install faster-whisper)")
+        if engine == "parakeet_redux" and not redux_available():
+            raise RuntimeError("Parakeet Redux engine not installed. " + REDUX_INSTALL_HINT)
 
         # where do outputs go?
         # abspath, not dirname: a source given as a bare file name has no directory part, and the empty
@@ -181,7 +184,16 @@ class _Worker(QThread):
         wav = os.path.join(tmpdir, "audio.wav")
         audio_for_engine = src
         try:
-            if find_ffmpeg():
+            if engine == "parakeet_redux":
+                # This engine decodes the media itself, and its own audio-track
+                # selection is the better one: `-map 0:a:0` below takes the FIRST
+                # stream, which on a MULTi release is the dub (measured here: a
+                # French VFF track came first, and an English run transcribed the
+                # French from that WAV). ffmpeg is still required — the runtime
+                # shells out to it.
+                if not find_ffmpeg():
+                    raise RuntimeError("FFmpeg is required for Parakeet Redux (it decodes the media itself).")
+            elif find_ffmpeg():
                 extract_audio(src, wav, stop_check=self._stop.is_set)
                 audio_for_engine = wav
             elif engine == "whisper_cpp":
@@ -195,6 +207,11 @@ class _Worker(QThread):
             t0 = [file_t0]                    # reset at each pass: a pass starts its position over at zero,
             t0_phase = [0]                    # and speed measured from the file start understates every later one
             wanted = max(1, min(5, int(s.get("passes", 2))))
+            if engine == "parakeet_redux":
+                # The runtime has no beam/temperature/context knob: decoding twice
+                # would repeat the identical computation and prove nothing, so this
+                # engine runs a single pass however many the user asked for.
+                wanted = 1
             verify = wanted > 1 and s.get("sync_mode") != "resync"
             phase = [0]                       # which decode we are in, when the file is transcribed twice
             phases = wanted if verify else 1
@@ -562,6 +579,14 @@ class ProcessManager(QObject):
             issues.append("No output format selected (Subtitles tab).")
         if s["engine"] == "faster_whisper" and not faster_whisper_available():
             issues.append("faster-whisper is not installed: pip install faster-whisper")
+        if s["engine"] == "parakeet_redux" and not redux_available():
+            issues.append("Parakeet Redux engine not installed: " + REDUX_INSTALL_HINT)
+        if s["engine"] == "parakeet_redux" and not find_ffmpeg():
+            issues.append("FFmpeg is required for Parakeet Redux (audio must be converted to 16 kHz WAV).")
+        if s["engine"] == "parakeet_redux" and s["task"] == "translate":
+            issues.append("Parakeet Redux transcribes only; use faster-whisper to translate.")
+        if s["engine"] == "parakeet_redux" and s.get("extra_args"):
+            issues.append("Extra whisper-cli arguments are ignored by the Parakeet Redux engine.")
         if s["engine"] == "whisper_cpp" and not find_whisper_cli(s.get("whisper_cli_path", "")):
             issues.append("whisper-cli executable not found (Advanced tab).")
         if s["engine"] == "whisper_cpp" and not find_ffmpeg():

@@ -10,6 +10,7 @@ where callbacks is a TranscribeCallbacks with:
     should_stop() -> bool
     wait_if_paused()                        # blocks while paused
 """
+import json
 import os
 import re
 import shlex
@@ -296,7 +297,142 @@ def transcribe_whisper_cpp(audio_path: str, settings: Dict, cb: TranscribeCallba
     return segments, meta
 
 
+# ---------------------------------------------------------------------------
+# Parakeet Redux (Photon runtime) — external, in its own venv
+# ---------------------------------------------------------------------------
+# Where vlc-ai-subs installs the runtime (venv-photon + photon_runner.py). Both
+# can be pointed elsewhere with the environment, and a batch user who never
+# installed vlc-ai-subs can install the runtime on its own.
+REDUX_ROOT = os.path.join(os.path.expanduser("~"), ".local", "share", "vlc-ai-subs")
+REDUX_VENV_ENV = "WHISPERER_REDUX_VENV"
+REDUX_RUNNER_ENV = "WHISPERER_REDUX_RUNNER"
+REDUX_INSTALL_HINT = ("Install it with vlc-ai-subs' installer "
+                      "(VSCL_AISUBS_PHOTON=1 ./install-photon-model.sh), or point "
+                      f"{REDUX_VENV_ENV} and {REDUX_RUNNER_ENV} at an existing runtime.")
+# The variants the runtime ships; anything else falls back to the measured default
+REDUX_MODELS = ("redux", "ultra", "recommended")
+DEFAULT_REDUX_MODEL = "redux"
+RAW_SEGMENTS_ENV = "VSCL_AISUBS_RAW_SEGMENTS"
+
+
+def redux_venv_dir(venv_dir: str = "") -> str:
+    return venv_dir or os.environ.get(REDUX_VENV_ENV) or os.path.join(REDUX_ROOT, "venv-photon")
+
+
+def redux_python(venv_dir: str = "") -> Optional[str]:
+    """The engine venv's interpreter, or None when the runtime is not installed"""
+    root = redux_venv_dir(venv_dir)
+    for name in ("python3", "python"):
+        path = os.path.join(root, "bin", name)
+        if os.path.isfile(path):
+            return path
+    win = os.path.join(root, "Scripts", "python.exe")           # a Windows install
+    return win if os.path.isfile(win) else None
+
+
+def redux_runner(runner_path: str = "") -> Optional[str]:
+    path = (runner_path or os.environ.get(REDUX_RUNNER_ENV)
+            or os.path.join(REDUX_ROOT, "photon_runner.py"))
+    return path if os.path.isfile(path) else None
+
+
+def redux_available(venv_dir: str = "", runner_path: str = "") -> bool:
+    return bool(redux_python(venv_dir) and redux_runner(runner_path))
+
+
+def redux_model_id(model: str) -> str:
+    """`redux` / `ultra` are the runtime's own variant names; anything else (a
+    Whisper size left over in the dropdown) means 'let the runtime decide'"""
+    return (model or "").strip().lower() if (model or "").strip().lower() in REDUX_MODELS \
+        else DEFAULT_REDUX_MODEL
+
+
+def transcribe_parakeet_redux(audio_path: str, settings: Dict, cb) -> Tuple[List[Dict], Dict]:
+    python, runner = redux_python(), redux_runner()
+    if not python or not runner:
+        raise FileNotFoundError(
+            "Parakeet Redux engine not installed (needs the Photon runtime: PyTorch + moondream in "
+            f"their own venv, plus photon_runner.py). {REDUX_INSTALL_HINT}")
+    if settings.get("task") == "translate":
+        raise RuntimeError("Parakeet Redux transcribes only — it has no translate head. "
+                           "Use faster-whisper for the translate task.")
+
+    model = redux_model_id(settings.get("model", ""))
+    total = float(cb.extra.get("duration") or 0)
+    language = "auto" if settings.get("language", "auto") == "auto" else settings["language"]
+
+    env = dict(os.environ)
+    env["PYTHONPATH"] = ""                       # a foreign PYTHONPATH loads another venv's torch
+    env["VSCL_AISUBS_DEVICE"] = settings.get("device") or "auto"
+    env["VSCL_AISUBS_PHOTON_MODEL"] = model
+    env[RAW_SEGMENTS_ENV] = "1"                  # this app applies its own cue rules
+
+    cmd = [python, runner, audio_path, model, language, "transcribe"]
+    cb.status("Transcribing with Parakeet Redux (one decode — segments arrive when it finishes)…")
+    proc = childproc.popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                           encoding="utf-8", errors="replace", bufsize=1, env=env)
+    cb.set_process(proc)
+    stderr_lines: List[str] = []
+
+    def _drain_err():
+        for line in proc.stderr:
+            stderr_lines.append(line)
+            if len(stderr_lines) > 200:          # keep the tail only: this can be a torch warning flood
+                del stderr_lines[:100]
+
+    t = threading.Thread(target=_drain_err, daemon=True)
+    t.start()
+
+    segments: List[Dict] = []
+    error = None
+    try:
+        for line in proc.stdout:
+            if cb.should_stop():
+                childproc.kill(proc)
+                raise StoppedError()
+            cb.wait_if_paused()
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            kind = event.get("type")
+            if kind == "status":
+                cb.status(str(event.get("msg") or ""))
+            elif kind == "sub":
+                text = (event.get("text") or "").strip()
+                if not text:
+                    continue
+                d = {"start": float(event["start"]), "end": float(event["end"]), "text": text}
+                segments.append(d)
+                cb.segment(d)
+                if total:
+                    cb.progress(d["end"], total)
+            elif kind == "error":
+                error = str(event.get("msg") or "unknown error")
+        proc.wait()
+    finally:
+        childproc.forget(proc)
+        cb.set_process(None)
+        t.join(timeout=2)
+
+    if cb.should_stop():
+        raise StoppedError()
+    if error:
+        raise RuntimeError(f"Parakeet Redux: {error}")
+    if proc.returncode != 0:
+        tail = "".join(stderr_lines[-15:]).strip()
+        raise RuntimeError(f"photon_runner exited with code {proc.returncode}:\n{tail}")
+
+    meta = {"engine": "Parakeet Redux (Photon)", "model": model, "device": env["VSCL_AISUBS_DEVICE"],
+            "language": settings.get("language", "auto"), "duration": total}
+    return segments, meta
+
+
 BACKENDS = {
     "faster_whisper": transcribe_faster_whisper,
     "whisper_cpp": transcribe_whisper_cpp,
+    "parakeet_redux": transcribe_parakeet_redux,
 }

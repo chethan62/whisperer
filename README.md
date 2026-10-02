@@ -10,11 +10,15 @@ A sibling of [videer](https://github.com/hclivess/videer) (same queue / progress
 
 ## Features
 
-- **Two engines**
+- **Three engines**
   - [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (CTranslate2) — built in, CPU or NVIDIA CUDA,
     models download automatically on first use, built-in VAD silence filter, word timestamps
   - [whisper.cpp](https://github.com/ggerganov/whisper.cpp) — drives an external `whisper-cli` binary
     (CPU / CUDA / Vulkan / Metal builds), GGML models
+  - [Parakeet Redux](#parakeet-redux-the-photon-runtime) — external, opt-in: NVIDIA's
+    `parakeet-tdt-0.6b-v3` in ternary weights (1.58-bit, 178 MB) on the Photon runtime. ~10x realtime on a
+    CPU here; transcribe only, no verification passes (nothing to vary between them), segments when it
+    finishes
 - All model sizes: `tiny` … `large-v3`, `large-v3-turbo`, `distil-large-v3`, English-only `*.en` variants,
     plus language fine-tunes from Hugging Face in the same dropdown (editable `models.json`)
 - English by default; ~30 languages or auto-detect; *translate to English* task
@@ -48,6 +52,8 @@ A sibling of [videer](https://github.com/hclivess/videer) (same queue / progress
 - Optional: NVIDIA GPU — see [GPU acceleration](#gpu-acceleration-nvidia) below.
 - Optional: `whisper-cli` from whisper.cpp plus GGML models (`ggml-small.en.bin` …) from
   [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp/tree/main)
+- Optional: the **Parakeet Redux** engine — see [its section](#parakeet-redux-the-photon-runtime); it is not
+  installed with this app and nothing is downloaded unless you ask for it.
 
 ## Run
 
@@ -126,6 +132,56 @@ PyTorch Whisper checkpoint has to go through `ct2-transformers-converter` first.
 
 Tips: keep **VAD filter** on (skips silence and prevents hallucinated text in quiet parts), use an
 **initial prompt** to teach the model names and jargon, and turn on **word timestamps** for tighter cue splitting.
+
+## Parakeet Redux (the Photon runtime)
+
+A third engine: NVIDIA's `parakeet-tdt-0.6b-v3` re-quantised to **ternary weights** (1.58-bit, 178 MB) and run
+by Moondream's *Photon* runtime, whose packed kernels are why it is fast. Measured on the same 44 s of real
+film dialogue, 8 CPU threads, on an idle box:
+
+| engine | transcribe time | vs realtime |
+|---|---|---|
+| **Parakeet Redux, CPU** | 4.5 s | **9.8x** |
+| whisper.cpp `ggml-small`, 8 CPU threads | 17.0 s | 2.6x |
+
+(Transcribe time only, the one-time model load reported separately — 4.3 s for Redux, which is why a short
+clip reads slower than the engine is.)
+
+**It is not part of this app and it is not open.** The weights are CC-BY-4.0; the runtime is proprietary
+(`moondream` + `kestrel-kernels`, the ternary GEMM kernels), which is why it is opt-in, nothing is vendored,
+and the installer prints the licence before downloading anything. Install it with
+[vlc-ai-subs](https://github.com/chethan62/vlc-ai-subs)' installer — the engine, its runner and its own venv
+live there:
+
+```bash
+git clone https://github.com/chethan62/vlc-ai-subs && cd vlc-ai-subs
+VSCL_AISUBS_PHOTON=1 ./install.sh        # adds venv-photon (CPU PyTorch + moondream) and photon_runner.py
+```
+
+whisperer then finds it at `~/.local/share/vlc-ai-subs/` and says so on the Engine tab. An existing install
+somewhere else is picked up with `WHISPERER_REDUX_VENV` and `WHISPERER_REDUX_RUNNER`.
+
+What is specific to this engine, so nothing surprises you mid-run:
+
+- **The device is resolved by the runtime, not by *Device*.** `auto` (the default) uses a device with a
+  packed ternary kernel — x86 CPU, or Apple Metal — and **never the GPU**: on CUDA the codes are dequantised
+  dense and the same machine measured **2–2.4x slower** than its CPU. `Device = cuda` is still honoured, with
+  the caveat printed in the status feed.
+- **One decode, no streaming.** The runtime transcribes the whole file in one call, so the progress bar
+  jumps from 0 to 100 % and the live transcript fills in at the end. The status line tells you what it is
+  doing meanwhile (decode, model load, transcribe).
+- **No verification passes.** *Passes* is ignored for this engine: it has no beam, temperature or context
+  knob, so a second decode repeats the identical computation and proves nothing. The cue work this app does
+  — max line length, max cue duration, VAD snapping, min duration, merge — still applies: the engine is asked
+  for **raw segments** so those settings are the only rules the cues meet.
+- **Transcribe only** — there is no translate head, and the settings check says so rather than failing after
+  the audio is decoded.
+- **It picks the audio track itself**, which matters on a MULTi release: the extraction this app does before
+  every run takes `-map 0:a:0`, the first stream, and that is the dub on many releases (a French VFF track on
+  the episode we measured). This engine is handed the source file instead and selects the track matching the
+  chosen language, skipping audio-description tracks, and reports which it used.
+- **English is the measured language.** The base model covers 25 European languages, but only English has been
+  measured here — other languages are untested rather than broken.
 
 ## Sync
 
