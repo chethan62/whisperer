@@ -120,24 +120,42 @@ LANGUAGE_TAGS = {
 }
 
 
+# A track whose title says one of these is not the dialogue. The standard dispositions
+# are useless here: measured on a real release, the audio-description track carried
+# visual_impaired=0 and no flag at all — only title="Descriptive". Transcribing the
+# narration instead of the dialogue is a silent wrong answer, so it is never preferred
+# while a plain track exists. (Same list, same reason, as vlc-ai-subs' core/audio.py.)
+NON_DIALOGUE_MARKERS = ("descript", "comment", "narration", "visually impaired", "audio desc")
+
+
 def probe_audio_streams(src: str) -> list:
-    """The file's audio streams in file order as [{index, language, title}], or []
-    when ffprobe is missing or the file will not probe."""
+    """The file's audio streams in file order as
+    [{index, language, title, non_dialogue}], or [] when ffprobe is missing or the file
+    will not probe."""
     ffprobe = find_ffprobe()
     if not ffprobe:
         return []
     try:
         out = childproc.run(
             [ffprobe, "-v", "error", "-select_streams", "a",
-             "-show_entries", "stream=index:stream_tags=language,title", "-of", "json", src],
+             "-show_entries",
+             "stream=index,disposition:stream_tags=language,title", "-of", "json", src],
             text=True, timeout=60)
         streams = json.loads(out.stdout or "{}").get("streams", [])
     except Exception:
         return []
-    return [{"index": i,
-             "language": str(((s.get("tags") or {}).get("language")) or "").strip().lower(),
-             "title": str((s.get("tags") or {}).get("title") or "").strip()}
-            for i, s in enumerate(streams)]
+    out = []
+    for i, stream in enumerate(streams):
+        tags = stream.get("tags") or {}
+        title = str(tags.get("title") or "").strip()
+        disposition = stream.get("disposition") or {}
+        out.append({"index": i,
+                    "language": str(tags.get("language") or "").strip().lower(),
+                    "title": title,
+                    "non_dialogue": bool(disposition.get("visual_impaired")
+                                         or disposition.get("comment")
+                                         or any(m in title.lower() for m in NON_DIALOGUE_MARKERS))})
+    return out
 
 
 def choose_audio_stream(streams: list, language: str) -> tuple:
@@ -156,15 +174,31 @@ def choose_audio_stream(streams: list, language: str) -> tuple:
     # "und"/"unknown" are ffmpeg's own way of saying a track carries no language:
     # untagged, so it can never satisfy a request
     tags = ["" if s["language"] in ("und", "unknown") else s["language"] for s in streams]
+
+    def label(i: int) -> str:
+        if len(streams) == 1:
+            return ""
+        text = f"{i + 1}/{len(streams)} · {tags[i] or 'untagged'}"
+        return text + " (descriptive — no plain dialogue track)" if streams[i].get("non_dialogue") else text
+
+    # the strongest signal is the language the user asked for; among tracks that match
+    # it, a descriptive/commentary one is only used when the file has no plain one, and
+    # the label admits the compromise — a transcript in the language the user did not
+    # ask for is useless to them, so language outranks track kind here (on this release
+    # the two English tracks happened to transcribe identically, so that judgement is
+    # untested against real narration)
     code = (language or "").strip().lower()
     if code and code != "auto":
         wanted = LANGUAGE_TAGS.get(code, (code,))
-        for i, tag in enumerate(tags):
-            if tag and tag in wanted:
-                return i, (f"{i + 1}/{len(streams)} · {tag}" if len(streams) > 1 else "")
-    if len(streams) > 1:
-        return 0, f"1/{len(streams)} · {tags[0] or 'untagged'}"
-    return 0, ""
+        matches = [i for i, tag in enumerate(tags) if tag and tag in wanted]
+        if matches:
+            plain_matches = [i for i in matches if not streams[i].get("non_dialogue")]
+            chosen = (plain_matches or matches)[0]
+            return chosen, label(chosen)
+    # no track claims that language (or auto-detect): the old first-stream behaviour,
+    # except that a descriptive track is stepped over when anything else exists
+    plain = [i for i, s in enumerate(streams) if not s.get("non_dialogue")] or list(range(len(streams)))
+    return plain[0], label(plain[0])
 
 
 def extract_audio(src: str, dst_wav: str, stop_check=None, language: str = "") -> str:
