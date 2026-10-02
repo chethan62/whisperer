@@ -309,8 +309,8 @@ REDUX_RUNNER_ENV = "WHISPERER_REDUX_RUNNER"
 REDUX_INSTALL_HINT = ("Install it with vlc-ai-subs' installer "
                       "(VSCL_AISUBS_PHOTON=1 ./install-photon-model.sh), or point "
                       f"{REDUX_VENV_ENV} and {REDUX_RUNNER_ENV} at an existing runtime.")
-# The variants the runtime ships; anything else falls back to the measured default
-REDUX_MODELS = ("redux", "ultra", "recommended")
+# The variant names the runtime itself understands (VSCL_AISUBS_PHOTON_MODEL)
+REDUX_MODELS = ("redux", "ultra")
 DEFAULT_REDUX_MODEL = "redux"
 RAW_SEGMENTS_ENV = "VSCL_AISUBS_RAW_SEGMENTS"
 
@@ -341,10 +341,19 @@ def redux_available(venv_dir: str = "", runner_path: str = "") -> bool:
 
 
 def redux_model_id(model: str) -> str:
-    """`redux` / `ultra` are the runtime's own variant names; anything else (a
-    Whisper size left over in the dropdown) means 'let the runtime decide'"""
-    return (model or "").strip().lower() if (model or "").strip().lower() in REDUX_MODELS \
-        else DEFAULT_REDUX_MODEL
+    """The runtime's variant name, a literal Hugging Face repo id, or the default.
+
+    `VSCL_AISUBS_PHOTON_MODEL` takes `redux` / `ultra` **or a literal repo id** —
+    anything else is taken as an id, so a Whisper size left over from another
+    engine (`large-v3`, `recommended`) would be fetched as a repo and fail with
+    "Photon failed: …" after the audio was already decoded. Those map to the
+    measured default instead; the model dropdown is editable, so a real repo id
+    still gets through.
+    """
+    key = (model or "").strip()
+    if key.lower() in REDUX_MODELS:
+        return key.lower()
+    return key if "/" in key else DEFAULT_REDUX_MODEL
 
 
 def transcribe_parakeet_redux(audio_path: str, settings: Dict, cb) -> Tuple[List[Dict], Dict]:
@@ -358,6 +367,9 @@ def transcribe_parakeet_redux(audio_path: str, settings: Dict, cb) -> Tuple[List
                            "Use faster-whisper for the translate task.")
 
     model = redux_model_id(settings.get("model", ""))
+    asked = (settings.get("model") or "").strip()
+    if asked and asked.lower() not in REDUX_MODELS and "/" not in asked:
+        cb.status(f"Parakeet Redux: '{asked}' is not a variant of this engine — running {model}.")
     total = float(cb.extra.get("duration") or 0)
     language = "auto" if settings.get("language", "auto") == "auto" else settings["language"]
 
@@ -366,6 +378,11 @@ def transcribe_parakeet_redux(audio_path: str, settings: Dict, cb) -> Tuple[List
     env["VSCL_AISUBS_DEVICE"] = settings.get("device") or "auto"
     env["VSCL_AISUBS_PHOTON_MODEL"] = model
     env[RAW_SEGMENTS_ENV] = "1"                  # this app applies its own cue rules
+    threads = int(settings.get("cpu_threads", 0) or 0)
+    if threads > 0:
+        # the runtime sizes its own thread pool otherwise; OpenMP is the knob torch's
+        # CPU kernels read (ponytail: OMP only — add MKL_NUM_THREADS if a box shows no effect)
+        env["OMP_NUM_THREADS"] = str(threads)
 
     cmd = [python, runner, audio_path, model, language, "transcribe"]
     cb.status("Transcribing with Parakeet Redux (one decode — segments arrive when it finishes)…")

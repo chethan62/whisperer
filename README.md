@@ -141,7 +141,7 @@ film dialogue, 8 CPU threads, on an idle box:
 
 | engine | transcribe time | vs realtime |
 |---|---|---|
-| **Parakeet Redux, CPU** | 4.5 s | **9.8x** |
+| **Parakeet Redux, CPU** | 4.5–5.1 s | **8.5–9.8x** |
 | whisper.cpp `ggml-small`, 8 CPU threads | 17.0 s | 2.6x |
 
 (Transcribe time only, the one-time model load reported separately — 4.3 s for Redux, which is why a short
@@ -182,6 +182,17 @@ What is specific to this engine, so nothing surprises you mid-run:
   chosen language, skipping audio-description tracks, and reports which it used.
 - **English is the measured language.** The base model covers 25 European languages, but only English has been
   measured here — other languages are untested rather than broken.
+- **Model**: `redux` (default, 178 MB) or `ultra` (385 MB). The dropdown stays editable and a real Photon repo
+  id (`owner/name`) is passed through, but a Whisper size left over from another engine (`large-v3`,
+  `recommended`) would be read by the runtime as a repo and fetched as one — those are replaced by `redux`, and
+  the status feed says so instead of failing after the audio was already decoded.
+- **Timing is segment-level.** Redux reports no word timings, so *Snap to speech* and the sentence repairs work
+  from the VAD's speech regions and the cue spans rather than from word alignment — the same fallback a Whisper
+  run without word timestamps takes.
+- **CPU threads** is passed through (OpenMP), as it is for the other engines; `auto` leaves the runtime's own
+  thread pool alone.
+- The runtime is installed by a shell installer, so **Linux and macOS** are the paths that are tested. On Windows,
+  point `WHISPERER_REDUX_VENV` and `WHISPERER_REDUX_RUNNER` at an existing install.
 
 ## Sync
 

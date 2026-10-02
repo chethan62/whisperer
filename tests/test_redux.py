@@ -75,7 +75,7 @@ def _callbacks(cb):
 CUE_BODY = "\n".join([
     f'echo {_STATUS!r}',
     'echo "{\\"type\\": \\"status\\", \\"msg\\": \\"RAW=$VSCL_AISUBS_RAW_SEGMENTS MODEL=$VSCL_AISUBS_PHOTON_MODEL '
-    'DEVICE=$VSCL_AISUBS_DEVICE PYTHONPATH=$PYTHONPATH\\"}"',
+    'DEVICE=$VSCL_AISUBS_DEVICE THREADS=$OMP_NUM_THREADS PYTHONPATH=$PYTHONPATH\\"}"',
     'echo \'{"type": "sub", "i": 1, "start": 0.5, "end": 2.5, "text": " Hello there. "}\'',
     'echo \'{"type": "sub", "i": 2, "start": 3.0, "end": 5.0, "text": "General Kenobi."}\'',
     'echo \'{"type": "done", "segments": 2, "srt_path": null}\'',
@@ -99,16 +99,40 @@ def test_the_engine_is_offered_and_registered():
 
 
 def test_the_variant_mapping_never_invents_a_model():
+    """The runtime reads anything that is not `redux`/`ultra` as a literal HF repo
+    id, so a Whisper size left over from another engine must not be passed on: it
+    would be fetched as a repo and fail after the audio was already decoded."""
     assert backends.redux_model_id("redux") == "redux"
     assert backends.redux_model_id("ultra") == "ultra"
-    assert backends.redux_model_id("recommended") == "recommended"   # the runtime's own default
+    assert backends.redux_model_id("ULTRA") == "ultra"
     assert backends.redux_model_id("large-v3") == "redux", "a left-over Whisper size is not a variant"
+    assert backends.redux_model_id("recommended") == "redux"
     assert backends.redux_model_id("") == "redux"
+    # …while a real repo id is a documented runtime capability, not a typo
+    assert backends.redux_model_id("moondream/parakeet-ultra") == "moondream/parakeet-ultra"
 
 
-# ---------------------------------------------------------------------------
-# The contract with the runner
-# ---------------------------------------------------------------------------
+def test_a_substituted_variant_is_announced(tmp_path, monkeypatch):
+    _fake_runtime(tmp_path, CUE_BODY, monkeypatch)
+    cb = _Cb()
+    backends.transcribe_parakeet_redux(str(tmp_path / "a.wav"), _settings(model="large-v3"), _callbacks(cb))
+    assert any("'large-v3' is not a variant" in s for s in cb.statuses), cb.statuses
+    assert any("MODEL=redux" in s for s in cb.statuses)
+
+
+def test_cpu_threads_reach_the_runtime(tmp_path, monkeypatch):
+    """Both other engines honour CPU threads (cpu_threads kwarg / -t), so this one
+    does too — through the knob torch's CPU kernels read."""
+    _fake_runtime(tmp_path, CUE_BODY, monkeypatch)
+    monkeypatch.delenv("OMP_NUM_THREADS", raising=False)
+    cb = _Cb()
+    backends.transcribe_parakeet_redux(str(tmp_path / "a.wav"), _settings(cpu_threads=0), _callbacks(cb))
+    assert any("THREADS= " in s for s in cb.statuses), "auto leaves the runtime's own pool alone"
+
+    cb = _Cb()
+    backends.transcribe_parakeet_redux(str(tmp_path / "a.wav"), _settings(cpu_threads=6), _callbacks(cb))
+    assert any("THREADS=6" in s for s in cb.statuses), cb.statuses
+
 
 def test_cues_progress_and_the_environment_reach_the_caller(tmp_path, monkeypatch):
     _fake_runtime(tmp_path, CUE_BODY, monkeypatch)
@@ -136,6 +160,16 @@ def test_the_chosen_variant_is_passed_to_the_runtime(tmp_path, monkeypatch):
     cb = _Cb()
     backends.transcribe_parakeet_redux(str(tmp_path / "a.wav"), _settings(model="ultra"), _callbacks(cb))
     assert any("MODEL=ultra" in s for s in cb.statuses)
+
+
+def test_a_repo_id_is_not_rewritten(tmp_path, monkeypatch):
+    """An editable combo can carry a real Photon repo id — that is a runtime
+    feature, so it must reach the runner untouched."""
+    _fake_runtime(tmp_path, CUE_BODY, monkeypatch)
+    cb = _Cb()
+    backends.transcribe_parakeet_redux(str(tmp_path / "a.wav"),
+                                       _settings(model="moondream/parakeet-ultra"), _callbacks(cb))
+    assert any("MODEL=moondream/parakeet-ultra" in s for s in cb.statuses), cb.statuses
 
 
 def test_an_error_event_becomes_the_exception(tmp_path, monkeypatch):
