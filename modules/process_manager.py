@@ -182,7 +182,12 @@ class _Worker(QThread):
         audio_for_engine = src
         try:
             if find_ffmpeg():
-                extract_audio(src, wav, stop_check=self._stop.is_set)
+                # extract the stream matching the chosen language, not just the first
+                # one: on a MULTi release the first stream is the dub
+                label = extract_audio(src, wav, stop_check=self._stop.is_set,
+                                      language=s.get("language", ""))
+                if label:
+                    self.status.emit(f"Audio track {label}")
                 audio_for_engine = wav
             elif engine == "whisper_cpp":
                 raise RuntimeError("FFmpeg is required to feed whisper.cpp (16 kHz WAV)")

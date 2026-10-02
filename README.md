@@ -18,6 +18,12 @@ A sibling of [videer](https://github.com/hclivess/videer) (same queue / progress
 - All model sizes: `tiny` … `large-v3`, `large-v3-turbo`, `distil-large-v3`, English-only `*.en` variants,
     plus language fine-tunes from Hugging Face in the same dropdown (editable `models.json`)
 - English by default; ~30 languages or auto-detect; *translate to English* task
+- **The right audio track**: on a release with several audio streams the one whose
+  language tag matches the language you picked is extracted (ISO-639-2, both the /B
+  and /T forms — `fre`/`fra`, `ger`/`deu`), instead of blindly the first stream, which
+  on a MULTi release is the dub. The status line names the track it used
+  (`Audio track 2/3 · eng`), and an untagged or unlisted language keeps the old
+  first-stream behaviour rather than guessing
 - Live queue: add files / folders or drag & drop while a run is in progress, reorder by dragging, pause / resume / stop
 - Live transcript panel — segments appear as they are decoded
 - Progress panel: per-file and overall bars, ETA, speed (× realtime), position, segment count

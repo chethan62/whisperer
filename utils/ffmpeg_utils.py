@@ -101,16 +101,87 @@ def probe_fps(path: str) -> Optional[float]:
         return None
 
 
-def extract_audio(src: str, dst_wav: str, stop_check=None) -> None:
-    """Decode any media file to 16 kHz mono PCM WAV (what Whisper models expect)"""
+# The language dropdown is ISO-639-1 ("en", "fr"); a container tags its tracks with
+# whatever the muxer wrote, and that is usually ISO-639-2 — both the /B and /T forms
+# are in the wild ("fre" and "fra" for French, "ger" and "deu" for German). A missed
+# tag is a wrong-language transcript, so match the requested code and both 3-letter
+# forms. Keys are the languages config.LANGUAGES offers (a test keeps them in step).
+LANGUAGE_TAGS = {
+    "en": ("en", "eng"), "cs": ("cs", "cze", "ces"), "de": ("de", "ger", "deu"),
+    "es": ("es", "spa"), "fr": ("fr", "fre", "fra"), "it": ("it", "ita"),
+    "ja": ("ja", "jpn"), "ko": ("ko", "kor"), "nl": ("nl", "dut", "nld"),
+    "pl": ("pl", "pol"), "pt": ("pt", "por"), "ru": ("ru", "rus"),
+    "sk": ("sk", "slo", "slk"), "sv": ("sv", "swe"), "tr": ("tr", "tur"),
+    "uk": ("uk", "ukr"), "zh": ("zh", "chi", "zho"), "ar": ("ar", "ara"),
+    "hi": ("hi", "hin"), "hu": ("hu", "hun"), "fi": ("fi", "fin"),
+    "da": ("da", "dan"), "no": ("no", "nor"), "el": ("el", "gre", "ell"),
+    "ro": ("ro", "rum", "ron"), "vi": ("vi", "vie"), "he": ("he", "heb"),
+    "cy": ("cy", "wel", "cym"),
+}
+
+
+def probe_audio_streams(src: str) -> list:
+    """The file's audio streams in file order as [{index, language, title}], or []
+    when ffprobe is missing or the file will not probe."""
+    ffprobe = find_ffprobe()
+    if not ffprobe:
+        return []
+    try:
+        out = childproc.run(
+            [ffprobe, "-v", "error", "-select_streams", "a",
+             "-show_entries", "stream=index:stream_tags=language,title", "-of", "json", src],
+            text=True, timeout=60)
+        streams = json.loads(out.stdout or "{}").get("streams", [])
+    except Exception:
+        return []
+    return [{"index": i,
+             "language": str(((s.get("tags") or {}).get("language")) or "").strip().lower(),
+             "title": str((s.get("tags") or {}).get("title") or "").strip()}
+            for i, s in enumerate(streams)]
+
+
+def choose_audio_stream(streams: list, language: str) -> tuple:
+    """(audio-relative index, label) for the track worth transcribing.
+
+    Blindly taking the first audio stream is how an English run transcribes the
+    French dub of a MULTi release — measured here: the VFF track came first and
+    Whisper dutifully wrote French cues. Match the requested language against the
+    stream tags instead, and when nothing matches (untagged web-dl, or a language
+    the file simply does not carry) keep the old first-stream behaviour while the
+    label says which track that was. The label is empty when there is no choice to
+    report, so a single-track file stays quiet.
+    """
+    if not streams:
+        return 0, ""
+    # "und"/"unknown" are ffmpeg's own way of saying a track carries no language:
+    # untagged, so it can never satisfy a request
+    tags = ["" if s["language"] in ("und", "unknown") else s["language"] for s in streams]
+    code = (language or "").strip().lower()
+    if code and code != "auto":
+        wanted = LANGUAGE_TAGS.get(code, (code,))
+        for i, tag in enumerate(tags):
+            if tag and tag in wanted:
+                return i, (f"{i + 1}/{len(streams)} · {tag}" if len(streams) > 1 else "")
+    if len(streams) > 1:
+        return 0, f"1/{len(streams)} · {tags[0] or 'untagged'}"
+    return 0, ""
+
+
+def extract_audio(src: str, dst_wav: str, stop_check=None, language: str = "") -> str:
+    """Decode any media file to 16 kHz mono PCM WAV (what Whisper models expect).
+
+    Returns a one-line description of the track that was used when the file carries
+    more than one audio stream, "" when there was nothing to choose.
+    """
     ffmpeg = find_ffmpeg()
     if not ffmpeg:
         raise RuntimeError("FFmpeg not found")
+    index, label = choose_audio_stream(probe_audio_streams(src), language)
     # first_pts=0 keeps an audio stream that starts after the video (common in MKV remuxes / captures) in place by
     # padding silence, and async=1 fills timestamp gaps, so second N of the WAV is second N of the video.
     # Without it every cue is early by the audio start time and drifts over dropped packets.
     cmd = [ffmpeg, "-y", "-hide_banner", "-loglevel", "error", "-nostdin",
-           "-i", src, "-vn", "-sn", "-dn", "-map", "0:a:0",
+           "-i", src, "-vn", "-sn", "-dn", "-map", f"0:a:{index}",
            "-af", "aresample=async=1:first_pts=0", "-ac", "1", "-ar", "16000",
            "-c:a", "pcm_s16le", dst_wav]
     proc = childproc.popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
@@ -125,6 +196,7 @@ def extract_audio(src: str, dst_wav: str, stop_check=None) -> None:
     childproc.forget(proc)
     if proc.returncode != 0:
         raise RuntimeError(f"FFmpeg failed to extract audio: {err.decode(errors='replace').strip()}")
+    return label
 
 
 def mux_subtitles(video: str, subtitle: str, output: str, container: str, language: str, stop_check=None) -> None:
