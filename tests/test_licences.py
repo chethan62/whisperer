@@ -75,15 +75,3 @@ def test_the_texts_copied_match_the_committed_ones(tmp_path, monkeypatch):
     for name in EXPECTED_TEXTS:
         committed = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "licences", name)
         assert open(committed, encoding="utf-8").read() == open(os.path.join(folder, name), encoding="utf-8").read()
-
-
-def test_the_proprietary_runtime_can_never_enter_a_release():
-    """The Photon runtime (moondream + kestrel-kernels, M87 Labs) is proprietary, licensed
-    only under a separate written agreement. The app deliberately does not bundle it — the
-    engine drives an external venv — and the build must refuse to pick it up even if an
-    import of it ever appears."""
-    cmd = " ".join(build.pyinstaller_command())
-    assert "--exclude-module=moondream" in cmd
-    assert "--exclude-module=kestrel_kernels" in cmd
-    assert not [n for n in build.BUNDLED if n.lower() in ("moondream", "kestrel-kernels", "kestrel_kernels")], \
-        "and it is not in the bundled notices either — it is never redistributed"

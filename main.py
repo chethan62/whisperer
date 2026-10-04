@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-whisperer - batch subtitle generator GUI (faster-whisper / whisper.cpp / Parakeet Redux)
+whisperer - batch subtitle generator GUI (faster-whisper / whisper.cpp)
 """
 import os
 import sys

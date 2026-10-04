@@ -15,10 +15,6 @@ A sibling of [videer](https://github.com/hclivess/videer) (same queue / progress
     models download automatically on first use, built-in VAD silence filter, word timestamps
   - [whisper.cpp](https://github.com/ggerganov/whisper.cpp) — drives an external `whisper-cli` binary
     (CPU / CUDA / Vulkan / Metal builds), GGML models
-  - [Parakeet Redux](#parakeet-redux-the-photon-runtime) — external, opt-in: NVIDIA's
-    `parakeet-tdt-0.6b-v3` in ternary weights (1.58-bit, 178 MB) on the Photon runtime. ~10x realtime on a
-    CPU here; transcribe only, no verification passes (nothing to vary between them), segments when it
-    finishes
 - All model sizes: `tiny` … `large-v3`, `large-v3-turbo`, `distil-large-v3`, English-only `*.en` variants,
     plus language fine-tunes from Hugging Face in the same dropdown (editable `models.json`)
 - English by default; ~30 languages or auto-detect; *translate to English* task
@@ -62,8 +58,6 @@ A sibling of [videer](https://github.com/hclivess/videer) (same queue / progress
 - Optional: NVIDIA GPU — see [GPU acceleration](#gpu-acceleration-nvidia) below.
 - Optional: `whisper-cli` from whisper.cpp plus GGML models (`ggml-small.en.bin` …) from
   [huggingface.co/ggerganov/whisper.cpp](https://huggingface.co/ggerganov/whisper.cpp/tree/main)
-- Optional: the **Parakeet Redux** engine — see [its section](#parakeet-redux-the-photon-runtime); it is not
-  installed with this app and nothing is downloaded unless you ask for it.
 
 ## Run
 
@@ -143,84 +137,31 @@ PyTorch Whisper checkpoint has to go through `ct2-transformers-converter` first.
 Tips: keep **VAD filter** on (skips silence and prevents hallucinated text in quiet parts), use an
 **initial prompt** to teach the model names and jargon, and turn on **word timestamps** for tighter cue splitting.
 
-## Parakeet Redux (the Photon runtime)
+## Removed in 1.9: Parakeet Redux (the Photon runtime)
 
-A third engine: NVIDIA's `parakeet-tdt-0.6b-v3` re-quantised to **ternary weights** (1.58-bit, 178 MB) and run
-by Moondream's *Photon* runtime, whose packed kernels are why it is fast. Measured on the same 44 s of real
-film dialogue, 8 CPU threads, on an idle box:
+A third engine was added here and then taken back out, because the licence of the
+thing that ran it does not allow what a shipped app implies.
 
-| engine | transcribe time | vs realtime |
-|---|---|---|
-| **Parakeet Redux, CPU** | 4.5–5.1 s | **8.5–9.8x** |
-| whisper.cpp `ggml-small`, 8 CPU threads | 17.0 s | 2.6x |
+The split was the awkward part. The **weights** were open — NVIDIA's
+`parakeet-tdt-0.6b-v3` re-quantised to ternary by Moondream (CC-BY-4.0, 178 MB),
+measured here at 8.5–9.8x realtime on 44 s of real film dialogue against whisper.cpp
+`ggml-small`'s 2.6x on the same audio, the fastest CPU figure this app ever produced.
+The **runtime** was not: `kestrel-kernels` (M87 Labs) — the packed kernels that *are*
+the speed — states that it is "licensed only under a separate written agreement", that
+"if you have not entered into such an Agreement, you have no license to use this
+software", and its section 2 forbids reverse engineering, deobfuscation, unpacking the
+packed kernel collection and any redistribution, naming AI assistants among those who
+must not do it. Section 4 adds that circumventing the container's protection may break
+anti-circumvention law, and section 6 terminates the licence on any breach.
 
-(Transcribe time only, the one-time model load reported separately — 4.3 s for Redux, which is why a short
-clip reads slower than the engine is.)
-
-The gap to the model card's figures is the instruction set, not the model: the runtime picks its packed kernel by
-ISA, and Moondream's own x86 measurement is **113×** on eight cores of an AMD EPYC with **AVX-512**. This
-laptop's i5-10300H has AVX2 only, which is why the same engine reads 8.5–9.8× here. Their FLEURS numbers cover
-all 25 languages the model supports — average 10.56 against the original's 11.62, but behind it on English
-(4.90 vs 4.25), French, German and Spanish, and widest behind in noise (9.04 vs 6.72 WER); only English has been
-measured in this app.
-
-**It is not part of this app and it is not open** — the weights are Moondream's CC-BY-4.0 quantisation of
-NVIDIA's Parakeet, and the runtime's kernels are proprietary; see
-[Credits and licences](#credits-and-licences). That is why it is opt-in, why nothing is vendored, and why the
-installer prints the terms before downloading anything. Install it with
-[vlc-ai-subs](https://github.com/chethan62/vlc-ai-subs)' installer — the engine, its runner and its own venv
-live there:
-
-```bash
-git clone https://github.com/chethan62/vlc-ai-subs && cd vlc-ai-subs
-VSCL_AISUBS_PHOTON=1 ./install.sh        # adds venv-photon (CPU PyTorch + moondream) and photon_runner.py
-```
-
-whisperer then finds it at `~/.local/share/vlc-ai-subs/` and says so on the Engine tab. An existing install
-somewhere else is picked up with `WHISPERER_REDUX_VENV` and `WHISPERER_REDUX_RUNNER`.
-
-What is specific to this engine, so nothing surprises you mid-run:
-
-- **The device is resolved by the runtime, not by *Device*.** `auto` (the default) uses a device with a
-  packed ternary kernel — x86 CPU, or Apple Metal — and **never the GPU**: on CUDA the codes are dequantised
-  dense and the same machine measured **2–2.4x slower** than its CPU. `Device = cuda` is still honoured, with
-  the caveat printed in the status feed.
-- **One decode, no streaming.** The runtime transcribes the whole file in one call, so the progress bar
-  jumps from 0 to 100 % and the live transcript fills in at the end. The status line tells you what it is
-  doing meanwhile (decode, model load, transcribe).
-- **No verification passes.** *Passes* is ignored for this engine: it has no beam, temperature or context
-  knob, so a second decode repeats the identical computation and proves nothing. The cue work this app does
-  — max line length, max cue duration, VAD snapping, min duration, merge — still applies: the engine is asked
-  for **raw segments** so those settings are the only rules the cues meet.
-- **Transcribe only** — there is no translate head, and the settings check says so rather than failing after
-  the audio is decoded.
-- **It picks the audio track itself**, which matters on a MULTi release: the extraction this app does before
-  every run takes `-map 0:a:0`, the first stream, and that is the dub on many releases (a French VFF track on
-  the episode we measured). This engine is handed the source file instead and selects the track matching the
-  chosen language, skipping audio-description tracks, and reports which it used.
-- **English is the measured language.** The base model covers 25 European languages, but only English has been
-  measured here — other languages are untested rather than broken.
-- **Model**: `redux` (default, 178 MB, ternary) or `ultra` (1.3 GB — the same 0.6B model in **full precision**,
-  post-trained further; Moondream's card has it better than the original on every benchmark group, and it is the
-  one built for GPUs). The dropdown stays editable and a real Photon repo
-  id (`owner/name`) is passed through, but a Whisper size left over from another engine (`large-v3`,
-  `recommended`) would be read by the runtime as a repo and fetched as one — those are replaced by `redux`, and
-  the status feed says so instead of failing after the audio was already decoded.
-- **`ultra` on a GPU box: set Device = cuda.** The rule that `auto` never picks the GPU is measured for `redux`,
-  whose packed ternary kernels exist for x86 and Apple silicon and *not* for CUDA. `ultra` is full precision — the
-  runtime dequantises nothing, and every published number for it is GPU throughput on a B200 (9,743× against
-  NeMo's 6,005× at batch 128); its CPU behaviour is unmeasured here. `auto` still prefers the CPU, so choose
-  `cuda` explicitly if that is the box you are on.
-- **Word timings are used when the cue work needs them.** The runtime returns per-word spans in the same call
-  (`timestamps="word"`), and the engine asks for them whenever the worker's cue work does — snapping, resync or
-  the sentence repairs — so nothing costs a second decode. Measured on the same 40 s of film dialogue: with the
-  spans the sentence repairs fire (`He's not.`, `Can I help you?`, `I'm not sure.` — the casing and full stops
-  this app restores from word timing) and **48 cue-text lines differ** against the same run with the request
-  suppressed. With snapping, resync, the repairs and the passes all off, no words are requested at all.
-- **CPU threads** is passed through (OpenMP), as it is for the other engines; `auto` leaves the runtime's own
-  thread pool alone.
-- The runtime is installed by a shell installer, so **Linux and macOS** are the paths that are tested. On Windows,
-  point `WHISPERER_REDUX_VENV` and `WHISPERER_REDUX_RUNNER` at an existing install.
+So the engine could not be used by anyone who had not signed something with a third
+party, and no number of opt-in switches or honest status lines fixes that. Everything
+Parakeet-Redux-specific is deleted: `transcribe_parakeet_redux`, its `REDUX_*`
+constants and the `VSCL_AISUBS_*` contract it drove, the model dropdown's `redux` /
+`ultra` variants, its status panel, its five sanity checks, its 7 tests, the
+`--exclude-module` guards that kept it out of the binaries, and its credits rows. The
+two engines that remain — and every other dependency of this app — are MIT or
+Apache-2.0.
 
 ## Sync
 
@@ -762,8 +703,6 @@ texts, with their sources and hashes.
 | faster-whisper | SYSTRAN ([repo](https://github.com/SYSTRAN/faster-whisper)) | MIT |
 | CTranslate2 (the inference engine under it) | OpenNMT ([repo](https://github.com/OpenNMT/CTranslate2)) | MIT |
 | whisper.cpp | ggml-org ([repo](https://github.com/ggml-org/whisper.cpp)) | MIT |
-| Photon runtime — `moondream` + `kestrel-kernels` | Moondream / M87 Labs ([PyPI](https://pypi.org/project/kestrel-kernels/)) | **proprietary**: licensed only under a separate written agreement with M87 Labs — its licence states that without one you have no licence to use it, so installing it is your decision and yours alone. Never bundled, redistributed or reverse-engineered here (published behaviour only), and the build excludes it outright (`--exclude-module`) so it cannot slip into a release binary. The `moondream` wheel itself carries no licence text and no licence field on PyPI — treat it as all rights reserved |
-| `photon_runner.py` and the Photon installer | chethan62 / voidrlm ([vlc-ai-subs](https://github.com/chethan62/vlc-ai-subs)) | MIT |
 | PySide6 (Qt for Python) — bundled in the prebuilt binaries | Qt Company ([PyPI](https://pypi.org/project/PySide6/)) | [LGPL-3.0](https://www.gnu.org/licenses/lgpl-3.0.html) (or GPL); the binaries are built `--onedir`, so the Qt libraries stay replaceable — see Qt's [LGPL obligations](https://www.qt.io/licensing/open-source-lgpl-obligations) |
 | psutil | Giampaolo Rodola ([PyPI](https://pypi.org/project/psutil/)) | BSD-3-Clause |
 | FFmpeg | FFmpeg project | not bundled — required in PATH, so it keeps the licence of your build (LGPL or GPL) |
@@ -776,12 +715,6 @@ texts, with their sources and hashes.
 | … in the CTranslate2 form faster-whisper loads | converted by SYSTRAN ([`Systran/faster-whisper-*`](https://huggingface.co/Systran/faster-whisper-small)) | MIT |
 | … in the GGML form whisper.cpp loads | converted by ggml-org ([`ggerganov/whisper.cpp`](https://huggingface.co/ggerganov/whisper.cpp)) | MIT |
 | `distil-*` and the `models.json` fine-tunes | the fine-tune's own author (community) | per its model card — check before downloading |
-| `redux` — parakeet-redux, 178 MB | ternary (1.58-bit) quantisation by Moondream of NVIDIA's [parakeet-tdt-0.6b-v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) ([card](https://huggingface.co/moondream/parakeet-redux)) | **[CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)** — attribution required, as for the original |
-| `ultra` — parakeet-ultra, 1.3 GB | the same 0.6B model in **full precision**, post-trained further, by Moondream ([card](https://huggingface.co/moondream/parakeet-ultra)) | **[CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/)** — attribution required |
-
-The Parakeet Redux engine is the one entry above whose **runtime** is not open source: that is why it is opt-in,
-why nothing about it is vendored, and why the installer prints its terms before downloading anything. Its
-weights are CC-BY-4.0 and are credited above, and its engine names both the original and the quantiser.
 
 ## License
 

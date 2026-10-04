@@ -16,7 +16,7 @@ from PySide6.QtGui import (QAction, QDragEnterEvent, QDropEvent, QColor, QBrush,
                            QTextCursor)
 from PySide6.QtCore import QUrl
 
-from config import (APP_NAME, APP_VERSION, ENGINES, MODEL_SIZES, REDUX_MODEL_CHOICES, DEVICES, COMPUTE_TYPES, LANGUAGES,
+from config import (APP_NAME, APP_VERSION, ENGINES, MODEL_SIZES, DEVICES, COMPUTE_TYPES, LANGUAGES,
                     TASKS, SUBTITLE_FORMATS, MUX_CONTAINERS, DEFAULT_SETTINGS, QUALITY_PRESETS,
                     MEDIA_EXTENSIONS, SYNC_MODES, DELIVERY_MODES, HARDCODE_QUALITY)
 from modules.backends import cuda_available, faster_whisper_available, is_model_cached, model_repo_id
@@ -930,25 +930,6 @@ class UIManager(QWidget):
             self._refresh_model_cache_label()
             self.engine_status.setText("Engine: faster-whisper ✓" if ok else "Engine: faster-whisper ✗")
             self.engine_status.setStyleSheet("color: green;" if ok else "color: red;")
-        elif engine == "parakeet_redux":
-            from modules.backends import (REDUX_INSTALL_HINT, redux_available, redux_python,
-                                          redux_runner)
-            ok = redux_available()
-            self.engine_hint.setText(
-                "Parakeet Redux on the Photon runtime — a ternary (1.58-bit) Parakeet, external and "
-                "opt-in: it needs its own venv (PyTorch + moondream), installed by vlc-ai-subs' "
-                "installer. Around 10-20x realtime on a CPU here, and it decodes once: no "
-                "verification passes, no translate, and the segments arrive when it finishes.")
-            self.hw_label.setText(
-                f"runtime: {redux_python() or 'venv not found'} · {redux_runner() or 'photon_runner.py not found'}"
-                if ok else f"Not installed — {REDUX_INSTALL_HINT}")
-            self.hw_label.setStyleSheet("color: %s; font-size: 11px;" % ("#155724" if ok else "#856404"))
-            self._fill_model_combo(engine)
-            self.model_cache_label.setText(
-                "Parakeet Redux: the runtime ships its own weights (178 MB / 385 MB, downloaded once)."
-                if ok else "")
-            self.engine_status.setText("Engine: Parakeet Redux ✓" if ok else "Engine: Parakeet Redux ✗")
-            self.engine_status.setStyleSheet("color: green;" if ok else "color: red;")
         else:
             from modules.backends import find_whisper_cli
             exe = find_whisper_cli(self.controls["whisper_cli_path"].text() if "whisper_cli_path" in self.controls else "")
@@ -1029,14 +1010,6 @@ class UIManager(QWidget):
         current = combo.currentText()
         blocked = combo.blockSignals(True)
         combo.clear()
-        if engine == "parakeet_redux":
-            # fixed ternary weights, chosen by the runtime: a Whisper size ladder here
-            # would be a dropdown that does nothing
-            for key, label in REDUX_MODEL_CHOICES:
-                combo.addItem(key)
-                combo.setItemData(combo.count() - 1, label, Qt.ItemDataRole.ToolTipRole)
-            combo.blockSignals(blocked)
-            return
         combo.addItems(MODEL_SIZES)
         if engine == "faster_whisper" and self._model_catalog:
             combo.insertSeparator(combo.count())
@@ -1148,14 +1121,12 @@ class UIManager(QWidget):
         QMessageBox.about(self.main_window, f"About {APP_NAME}",
                           f"<h3>{APP_NAME} v{APP_VERSION}</h3>"
                           "<p>Batch subtitle generator for video and audio files, powered by OpenAI Whisper "
-                          "models via <b>faster-whisper</b> (CTranslate2) or <b>whisper.cpp</b>, "
-                          "or by <b>Parakeet Redux</b> on the external Photon runtime.</p>"
+                          "models via <b>faster-whisper</b> (CTranslate2) or <b>whisper.cpp</b>.</p>"
                           "<p>Drop files, pick a model, press Start — SRT/VTT/TXT/JSON subtitles are written "
                           "next to your videos, optionally embedded as a soft subtitle track.</p>"
                           "<p>MIT License · <a href='https://github.com/hclivess/whisperer'>github.com/hclivess/whisperer</a></p>"
                           "<p style='font-size: 11px;'>Engine credits: Whisper by OpenAI (MIT); faster-whisper by "
-                          "SYSTRAN, whisper.cpp by ggml-org (both MIT); Parakeet Redux weights by NVIDIA and "
-                          "Moondream (CC-BY-4.0) on the proprietary Photon runtime. Full list in the "
+                          "SYSTRAN, whisper.cpp by ggml-org (both MIT). Full list in the "
                           "README's Credits and licences.</p>")
 
     def _show_model_info(self):
@@ -1341,12 +1312,6 @@ class UIManager(QWidget):
     def _device_text(self) -> str:
         if self.controls["engine"].currentData() == "whisper_cpp":
             return "whisper.cpp"
-        if self.controls["engine"].currentData() == "parakeet_redux":
-            # the runner decides: `auto` prefers a device with a packed ternary
-            # kernel (CPU/Apple Metal) and never the GPU, where this engine is slower
-            pick = self.controls["device"].currentText()
-            return {"auto": "CPU (auto)", "cpu": "CPU", "cuda": "CUDA (slower for this engine)"}.get(
-                pick, pick.upper())
         dev = self.controls["device"].currentText()
         if dev == "auto":
             dev = "cuda" if cuda_available(self.controls["cuda_lib_dir"].text().strip()) else "cpu"
