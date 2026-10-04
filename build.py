@@ -184,6 +184,11 @@ def pyinstaller_command() -> list:
         "--exclude-module=PySide6.Qt3DCore", "--exclude-module=PySide6.QtQuick", "--exclude-module=PySide6.QtQml",
         "--exclude-module=PySide6.QtMultimedia", "--exclude-module=PySide6.QtCharts", "--exclude-module=PySide6.QtPdf",
         "--exclude-module=torch", "--exclude-module=tkinter",
+        # the Photon runtime is PROPRIETARY (M87 Labs) and must never travel inside a
+        # released binary: this app never imports it (the engine spawns an external venv),
+        # so these two exclusions are the belt to that braces — if an import ever appears,
+        # the build refuses to bundle it instead of shipping proprietary kernels silently
+        "--exclude-module=moondream", "--exclude-module=kestrel_kernels",
         f"--add-data={os.path.join(ROOT, 'icon.ico')}{os.pathsep}.",
         # the app's own licence and the third-party licence texts + notices:
         # LGPL-3.0 (Qt) and Apache-2.0 require them to travel with the binary
